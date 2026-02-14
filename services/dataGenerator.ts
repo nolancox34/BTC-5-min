@@ -2,35 +2,32 @@
 import { GlobalState, Market, BTCState } from '../types';
 
 export class MarketSimulator {
-  private static lastPrice = 68000;
+  private static lastPrice = 65000;
   private static momentum = 5;
   private static priceHistory: number[] = [];
   public static networkStatus: 'stable' | 'degraded' | 'offline' = 'stable';
 
   /**
-   * Robust Price Aggregator
-   * Tries multiple browser-friendly public APIs to bypass CORS and rate limits.
+   * Fetches BTC price using highly permissive CORS-friendly endpoints.
    */
   static async fetchLivePrice(): Promise<number> {
     const endpoints = [
       {
-        url: 'https://api.coincap.io/v2/assets/bitcoin',
-        parse: (d: any) => parseFloat(d.data.priceUsd)
+        // CoinDesk is very reliable for browser-side requests
+        url: 'https://api.coindesk.com/v1/bpi/currentprice.json',
+        parse: (d: any) => parseFloat(d.bpi.USD.rate_float)
       },
       {
-        url: 'https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT',
-        parse: (d: any) => parseFloat(d.price)
-      },
-      {
-        url: 'https://api.kraken.com/0/public/Ticker?pair=XBTUSD',
-        parse: (d: any) => parseFloat(d.result.XXBTZUSD.c[0])
+        // Blockchain.info is a solid secondary fallback
+        url: 'https://blockchain.info/ticker?cors=true',
+        parse: (d: any) => parseFloat(d.USD.last)
       }
     ];
 
     for (const api of endpoints) {
       try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 3000); // 3s timeout
+        const timeoutId = setTimeout(() => controller.abort(), 4000);
 
         const response = await fetch(api.url, { 
           signal: controller.signal,
@@ -43,21 +40,21 @@ export class MarketSimulator {
           const data = await response.json();
           const price = api.parse(data);
           
-          if (!isNaN(price) && price > 0) {
+          if (!isNaN(price) && price > 1000) { // Sanity check
             this.lastPrice = price;
             this.networkStatus = 'stable';
             return price;
           }
         }
       } catch (e) {
-        console.warn(`Price feed failed for ${api.url}, trying next...`);
+        console.warn(`Price feed failed for ${api.url}: ${e}`);
       }
     }
 
-    // Fallback logic
+    // Ultimate fallback for offline/blocked environments
     this.networkStatus = 'degraded';
-    const jitter = (Math.random() - 0.5) * 5;
-    this.lastPrice += jitter;
+    const drift = (Math.random() - 0.48) * 12; // Slight upward bias
+    this.lastPrice += drift;
     return this.lastPrice;
   }
 
@@ -87,19 +84,19 @@ export class MarketSimulator {
 
   static async tick(state: GlobalState): Promise<GlobalState> {
     const newPrice = await this.fetchLivePrice();
-    const priceChange1m = (newPrice - this.lastPrice) / (this.lastPrice || 1);
+    const priceChange1m = (newPrice - (this.lastPrice || 65000)) / (this.lastPrice || 65000);
     
     this.priceHistory.push(newPrice);
-    if (this.priceHistory.length > 12) this.priceHistory.shift();
+    if (this.priceHistory.length > 20) this.priceHistory.shift();
     
     const firstPrice = this.priceHistory[0];
     const momentumRaw = firstPrice ? ((newPrice - firstPrice) / firstPrice) * 1000 : 0; 
-    this.momentum = Math.max(0, Math.min(10, 5 + momentumRaw));
+    this.momentum = Math.max(0, Math.min(10, 5 + (momentumRaw * 2)));
 
     const btc: BTCState = {
       price: newPrice,
       momentum_score: this.momentum,
-      vol: Math.abs(momentumRaw) * 0.1,
+      vol: Math.abs(momentumRaw) * 0.15,
       change_24h: state.btc.change_24h,
       change_1m: priceChange1m
     };
@@ -107,19 +104,20 @@ export class MarketSimulator {
     const updatedMarkets = state.markets.map(m => {
       const elapsed = m.time_elapsed_seconds + 5;
       
+      // Rotate finished markets
       if (elapsed >= 300) {
-        return this.createMarket(newPrice + (Math.random() - 0.5) * 60);
+        return this.createMarket(newPrice + (Math.random() - 0.5) * 80);
       }
 
       const priceDiff = newPrice - m.strike_price;
-      const baseProb = 1 / (1 + Math.exp(-priceDiff / 15));
-      const spread = 0.01 + Math.random() * 0.01; // Tighter spreads for PRO tier simulation
+      const baseProb = 1 / (1 + Math.exp(-priceDiff / 20));
+      const spread = 0.015;
       
       return { 
         ...m, 
         time_elapsed_seconds: elapsed,
-        yes_ask: Math.max(0.01, Math.min(0.99, baseProb + spread/2 + (Math.random() - 0.5) * 0.005)),
-        no_ask: Math.max(0.01, Math.min(0.99, (1 - baseProb) + spread/2 + (Math.random() - 0.5) * 0.005))
+        yes_ask: Math.max(0.01, Math.min(0.99, baseProb + spread/2)),
+        no_ask: Math.max(0.01, Math.min(0.99, (1 - baseProb) + spread/2))
       };
     });
 
@@ -127,8 +125,8 @@ export class MarketSimulator {
   }
 
   private static generateMarkets(basePrice: number): Market[] {
-    return [-80, -40, -20, 0, 20, 40, 80].map((offset) => 
-      this.createMarket(basePrice + offset, Math.floor(Math.random() * 200))
+    return [-100, -50, -25, 0, 25, 50, 100].map((offset) => 
+      this.createMarket(basePrice + offset, Math.floor(Math.random() * 250))
     );
   }
 
@@ -136,10 +134,10 @@ export class MarketSimulator {
     const idSuffix = Math.random().toString(36).substr(2, 5).toUpperCase();
     return {
       id: `BTC-5M-${idSuffix}`,
-      strike_price: Math.round(strike / 5) * 5,
+      strike_price: Math.round(strike / 10) * 10,
       yes_ask: 0.5,
       no_ask: 0.5,
-      liquidity_usd: 12000 + Math.random() * 25000,
+      liquidity_usd: 15000 + Math.random() * 30000,
       time_elapsed_seconds: elapsed,
       resolution_time: Date.now() + (300 - elapsed) * 1000
     };
