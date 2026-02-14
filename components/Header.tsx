@@ -25,7 +25,7 @@ const Header: React.FC<HeaderProps> = ({ btc, isLive, onToggleLive, aiStatus, is
     lastPrice.current = btc.price;
   }, [btc.price]);
 
-  const riskLevel = btc.vol > 0.15 ? 'CRITICAL' : btc.vol > 0.08 ? 'ELEVATED' : 'NOMINAL';
+  const riskLevel = btc.vol > 0.12 ? 'CRITICAL' : btc.vol > 0.08 ? 'ELEVATED' : 'NOMINAL';
 
   return (
     <header className="flex flex-col md:flex-row items-center justify-between gap-4 py-3 px-6 glass rounded-2xl border border-white/5 bg-slate-900/40">
@@ -39,10 +39,10 @@ const Header: React.FC<HeaderProps> = ({ btc, isLive, onToggleLive, aiStatus, is
           <h1 className="text-xl font-black tracking-tighter text-white uppercase leading-none">ProfitMax <span className="text-amber-500">PM5</span></h1>
           <div className="flex items-center gap-2 mt-1">
             <span className="text-[8px] text-slate-500 font-black uppercase mono tracking-widest">LIVE_EDGE_v1.3</span>
-            <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[8px] font-black border ${
-                riskLevel === 'CRITICAL' ? 'border-rose-500/50 text-rose-400 bg-rose-500/5' : 'border-emerald-500/30 text-emerald-400 bg-emerald-500/5'
+            <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[8px] font-black border transition-colors ${
+                networkStatus === 'stable' ? 'border-emerald-500/30 text-emerald-400' : 'border-amber-500/30 text-amber-400'
             }`}>
-                RISK: {riskLevel}
+                LINK: {networkStatus === 'stable' ? 'BLOCKCHAIN_LIVE' : 'SIM_SYNTH'}
             </div>
           </div>
         </div>

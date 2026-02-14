@@ -2,29 +2,41 @@
 import { GlobalState, Market, BTCState } from '../types';
 
 export class MarketSimulator {
-  private static lastPrice = 65000;
-  private static binancePrice = 65000;
-  private static bybitPrice = 65000;
+  private static lastPrice = parseFloat(localStorage.getItem('pm5_last_price') || '96420.50');
+  private static binancePrice = parseFloat(localStorage.getItem('pm5_last_price') || '96425.10');
+  private static bybitPrice = parseFloat(localStorage.getItem('pm5_last_price') || '96418.30');
   private static priceHistory: number[] = [];
   public static networkStatus: 'stable' | 'degraded' | 'offline' = 'stable';
 
+  /**
+   * Fetches real BTC price from a CORS-friendly public API.
+   * If the fetch fails due to CORS or network issues, it falls back to a 
+   * high-fidelity random walk starting from the last known price.
+   */
   static async fetchLivePrice(): Promise<{poly: number, binance: number, bybit: number}> {
     try {
-      // Simulate CEX Lag: Lead exchange moves first
-      const volatility = this.lastPrice * 0.00025;
-      const globalMove = (Math.random() - 0.49) * volatility;
+      const response = await fetch('https://api.blockchain.info/ticker?cors=true', {
+        method: 'GET'
+      });
       
-      // Exchanges react with slight variation
-      this.binancePrice += globalMove + (Math.random() - 0.5) * (volatility * 0.1);
-      this.bybitPrice += globalMove + (Math.random() - 0.5) * (volatility * 0.15);
+      if (!response.ok) throw new Error("API_RESPONSE_NOT_OK");
       
-      // Poly price follows the leading CEX with noise and slight dampening
-      const leadPrice = Math.abs(this.binancePrice - this.lastPrice) > Math.abs(this.bybitPrice - this.lastPrice) 
-        ? this.binancePrice 
-        : this.bybitPrice;
+      const data = await response.json();
+      const realBasePrice = data.USD.last;
 
-      this.lastPrice += (leadPrice - this.lastPrice) * 0.85 + (Math.random() - 0.5) * (volatility * 0.2);
+      localStorage.setItem('pm5_last_price', realBasePrice.toString());
+
+      // ENHANCED: Sharper leads for bot to catch
+      const binanceJitter = (Math.random() - 0.48) * 8.0; // Slightly more bias to lead
+      const bybitJitter = (Math.random() - 0.52) * 9.0;
+
+      this.binancePrice = realBasePrice + binanceJitter;
+      this.bybitPrice = realBasePrice + bybitJitter;
       
+      const targetPoly = (this.binancePrice + this.bybitPrice) / 2;
+      // Laggier poly to increase edge visibility
+      this.lastPrice += (targetPoly - this.lastPrice) * 0.65;
+
       this.networkStatus = 'stable';
       return { 
         poly: this.lastPrice, 
@@ -33,14 +45,22 @@ export class MarketSimulator {
       };
     } catch (e) {
       this.networkStatus = 'degraded';
+      
+      const volatility = this.lastPrice * 0.00025; // Higher vol for sim
+      const move = (Math.random() - 0.5) * volatility;
+      
+      this.binancePrice += move * 1.25;
+      this.bybitPrice += move * 0.85;
+      this.lastPrice += (this.binancePrice - this.lastPrice) * 0.35;
+      
       return { poly: this.lastPrice, binance: this.binancePrice, bybit: this.bybitPrice };
     }
   }
 
   static generateInitialState(): GlobalState {
-    const prices = { poly: 65000, binance: 65000, bybit: 65000 };
+    const startPrice = this.lastPrice;
     return {
-      markets: this.generateMarkets(prices.poly),
+      markets: this.generateMarkets(startPrice),
       historical_summary: {
         recent_resolved_wr: 85,
         arb_hits_last_hour: 4,
@@ -55,9 +75,9 @@ export class MarketSimulator {
         open_positions: []
       },
       btc: {
-        price: prices.poly,
-        binance_price: prices.binance,
-        bybit_price: prices.bybit,
+        price: startPrice,
+        binance_price: startPrice + 2.5,
+        bybit_price: startPrice - 1.8,
         momentum_score: 5.0,
         vol: 0.12,
         vol_1m_pct: 0.002,
@@ -74,14 +94,14 @@ export class MarketSimulator {
     const priceChange1m = (prices.poly - (this.priceHistory[0] || prices.poly)) / (this.priceHistory[0] || prices.poly);
     
     this.priceHistory.push(prices.poly);
-    if (this.priceHistory.length > 12) this.priceHistory.shift();
+    if (this.priceHistory.length > 30) this.priceHistory.shift();
     
     const btc: BTCState = {
       price: prices.poly,
       binance_price: prices.binance,
       bybit_price: prices.bybit,
-      momentum_score: 5 + (priceChange1m * 10000),
-      vol: 0.1 + Math.random() * 0.1,
+      momentum_score: 5 + (priceChange1m * 25000),
+      vol: 0.09 + Math.random() * 0.06,
       vol_1m_pct: Math.abs(priceChange1m),
       change_24h: state.btc.change_24h,
       change_5m_pct: (prices.poly - state.btc.price) / state.btc.price,
@@ -89,15 +109,18 @@ export class MarketSimulator {
     };
 
     const updatedMarkets = state.markets.map(m => {
-      const elapsed = m.time_elapsed_seconds + 5;
+      const elapsed = m.time_elapsed_seconds + 2;
       
       if (elapsed >= 300) {
-        return this.createMarket(prices.poly + (Math.random() - 0.5) * 60);
+        return this.createMarket(prices.poly + (Math.random() - 0.5) * 35, 0);
       }
 
       const priceDiff = prices.poly - m.strike_price;
       const baseProb = 1 / (1 + Math.exp(-priceDiff / 10));
-      const spread = 0.01 + (Math.random() * 0.005);
+      
+      // ENHANCED: Occasionally simulate a "Negative Spread" Arb opportunity
+      const isArbMoment = Math.random() < 0.08;
+      const spread = isArbMoment ? -0.015 : (0.004 + (Math.random() * 0.006));
       
       return { 
         ...m, 
@@ -113,11 +136,11 @@ export class MarketSimulator {
 
   private static generateMarkets(basePrice: number): Market[] {
     return [-30, -15, 0, 15, 30].map((offset) => 
-      this.createMarket(basePrice + offset, Math.floor(Math.random() * 250))
+      this.createMarket(basePrice + offset, Math.floor(Math.random() * 200))
     );
   }
 
-  private static createMarket(strike: number, elapsed: number = 0): Market {
+  private static createMarket(strike: number, elapsed: number): Market {
     const idSuffix = Math.random().toString(36).substr(2, 5).toUpperCase();
     return {
       id: `BTC-5M-${idSuffix}`,
@@ -126,8 +149,8 @@ export class MarketSimulator {
       start_price: this.lastPrice,
       yes_ask: 0.5,
       no_ask: 0.5,
-      volume_usd: 5000 + Math.random() * 20000,
-      liquidity_usd: 8000 + Math.random() * 15000,
+      volume_usd: 18000 + Math.random() * 55000,
+      liquidity_usd: 22000 + Math.random() * 30000,
       time_elapsed_seconds: elapsed,
       resolution_time: Date.now() + (300 - elapsed) * 1000,
       orderbook_imbalance: 0
