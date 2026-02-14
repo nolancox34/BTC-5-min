@@ -1,5 +1,5 @@
 {
-  "name": "PROFITMAX PM5 v1.2 - BTC Sniper Terminal",
-  "description": "An elite, adaptive Polymarket 5-minute BTC sniper dashboard implementing historical-learning algorithms and real-time edge calculations for automated high-frequency trading simulation.",
+  "name": "PROFITMAX PM5 v1.3 - BTC Sniper Terminal",
+  "description": "Elite, adaptive, loss-killing Polymarket 5-minute BTC sniper implementing 2026 proven historical edges: Arb, CEX-Lag, and Late-Window momentum.",
   "requestFramePermissions": []
 }

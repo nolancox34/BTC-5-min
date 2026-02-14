@@ -8,41 +8,36 @@ export const getExpertInsight = async (state: GlobalState, retries = 2, delay = 
   const apiKey = process.env.API_KEY;
   
   if (!apiKey || apiKey === "undefined") {
-    console.warn("Gemini API Key missing or undefined. Operating in basic mode.");
-    return state.btc.momentum_score > 7 ? "MOMENTUM PEAK: Scaling entry vectors." : "NEUTRAL SCAN: Holding baseline parameters.";
+    return state.btc.momentum_score > 7 ? "MOMENTUM_PEAK: Execute aggressive entry." : "NEUTRAL_REGIME: Maintain baseline capture.";
   }
 
   try {
     const ai = new GoogleGenAI({ apiKey });
-    const context = `BTC: ${state.btc.price.toFixed(0)}, Mom: ${state.btc.momentum_score.toFixed(1)}, Vol: ${state.btc.vol.toFixed(4)}`;
+    const context = `
+      BTC_PRICE: $${state.btc.price.toFixed(2)}
+      MOMENTUM_VECTOR: ${state.btc.momentum_score.toFixed(2)}
+      VOLATILITY_INDEX: ${state.btc.vol.toFixed(4)}
+      PNL_SESSION: $${state.wallet.pnl_today.toFixed(2)}
+      ACTIVE_SNIPES: ${state.wallet.active_positions}
+    `;
 
     const response = await ai.models.generateContent({
       model: 'gemini-3-pro-preview',
-      contents: `Context: ${context}. Tactical command for 5-min sniper bot? 1 short sentence.`,
+      contents: `CONTEXT: ${context}. ANALYZE MARKET REGIME AND PROVIDE 1 ALPHA-HEAVY TACTICAL DIRECTIVE (MAX 12 WORDS).`,
       config: {
-        systemInstruction: "You are the PROFITMAX PM5 OVERSEER. Use elite sniper persona. 1 sentence maximum.",
-        temperature: 0.6,
-        thinkingConfig: { thinkingBudget: 1000 }
+        systemInstruction: "You are the PROFITMAX QUANT DIRECTOR. Analyze BTC/Polymarket micro-caps. Be aggressive, technical, and precise. Use sniper/quant terminology.",
+        temperature: 0.8,
+        thinkingConfig: { thinkingBudget: 4000 }
       }
     });
     
-    return response.text?.trim() || "OVERSIGHT STABLE: Parameters nominal.";
+    return response.text?.trim() || "ENGINE_STABLE: Monitoring volatility spikes.";
 
   } catch (err: any) {
-    console.error("Gemini Insight Error:", err);
-    
-    if (err?.message?.includes("404") || err?.message?.includes("entity was not found")) {
-        if (typeof window !== 'undefined' && (window as any).aistudio?.openSelectKey) {
-            (window as any).aistudio.openSelectKey();
-        }
-        return "CONFIG ERROR: Re-linking project required.";
-    }
-
     if (retries > 0) {
       await sleep(delay);
       return getExpertInsight(state, retries - 1, delay * 1.5);
     }
-
-    return "SCANNING: Awaiting tactical clear.";
+    return "OVERSIGHT_BYPASS: Autonomic execution engaged.";
   }
 };
